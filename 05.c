@@ -148,17 +148,20 @@ int num_compare( const void *a, const void *b )
     return 0;
 }
 
-int relax_ranges( range_t *ranges, int ranges_n )
+int relax_ranges( range_t *ranges, int *ranges_n )
 {
+    range_t *ranges_p = ranges;
     int relaxed = 0;
-    for ( int i = 1; i < ranges_n; ++i )
-    {
-        if ( ranges[ i - 1 ].to == ranges[ i ].to
-             && ranges[ i - 1 ].from == ranges[ i ].from )
-            continue;
 
-        if ( ranges[ i - 1 ].to < ranges[ i ].from )
+    for ( int i = 1; i < *ranges_n; ++i )
+    {
+        if ( ranges_p->to < ranges[ i ].from )
+        {
+            ++ranges_p;
+            ranges_p->from = ranges[ i ].from;
+            ranges_p->to = ranges[ i ].to;
             continue;
+        }
 
         // overlaping
         ++relaxed;
@@ -166,18 +169,13 @@ int relax_ranges( range_t *ranges, int ranges_n )
         // two possibilities - first is containing the second fully or
         // first and the second are overlapping
 
-        // ranges[ i - 1 ].to > ranges[ i ].from
-        if ( ranges[ i - 1 ].to > ranges[ i ].to )
-        {
-            ranges[ i ].to = ranges[ i - 1 ].to;
-            ranges[ i ].from =  ranges[ i - 1 ].from;
-            continue;
-        }
-
-        // ranges[ i - 1 ].to <= ranges[ i ].to
-        ranges[ i - 1 ].to = ranges[ i ].to;
-        ranges[ i ].from =  ranges[ i - 1 ].from;
+        if ( ranges[ i - 1 ].to <= ranges[ i ].to )
+            ranges_p->to = ranges[ i ].to;
     }
+
+    *ranges_n = ( int ) ( ranges_p - ranges ) + 1;
+    ranges[ *ranges_n ].from  = UINT64_MAX;
+    ranges[ *ranges_n ].to  = UINT64_MAX;
 
     return relaxed;
 }
@@ -229,7 +227,7 @@ ssize_t process_data( FILE *in_file, size_t ( *part_fn ) ( range_t*, int, uint64
     uint64_t *items = NULL;
 
     if ( data_load( ( void** ) &ranges, &ranges_n, in_file, process_range ) < 0 )
-        goto finalize;;
+        goto finalize;
 
     if ( data_load( ( void** ) &items, &items_n, in_file, process_numlist ) < 0 )
         goto finalize;
@@ -237,8 +235,7 @@ ssize_t process_data( FILE *in_file, size_t ( *part_fn ) ( range_t*, int, uint64
     qsort( ranges, ranges_n, sizeof( range_t ), range_compare );
     qsort( items, items_n, sizeof( uint64_t ), num_compare );
 
-    while ( relax_ranges( ranges, ranges_n ) > 0 )
-        ;
+    relax_ranges( ranges, &ranges_n );
 
     rv = ( ssize_t ) part_fn( ranges, ranges_n, items, items_n );
 
